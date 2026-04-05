@@ -1,0 +1,31 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Build binaries
+        run: |
+          TOOL=$(basename $(ls cmd/))
+          VERSION=${GITHUB_REF#refs/tags/}
+          for target in "linux amd64" "linux arm64" "darwin arm64"; do
+            OS=$(echo $target | cut -d' ' -f1)
+            ARCH=$(echo $target | cut -d' ' -f2)
+            OUT="stockyard-${TOOL}_${OS}_${ARCH}"
+            CGO_ENABLED=0 GOOS=$OS GOARCH=$ARCH go build -ldflags="-s -w -X main.version=${VERSION}" -o "${OUT}" ./cmd/${TOOL}/
+            tar -czf "${OUT}.tar.gz" "${OUT}"
+            rm "${OUT}"
+          done
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.tar.gz"
+          generate_release_notes: true
