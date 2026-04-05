@@ -1,0 +1,12 @@
+version: "3.8"
+services:
+  reservation:
+    build: .
+    ports:
+      - "9806:9806"
+    volumes:
+      - reservation_data:/data
+    environment:
+      - PORT=9806
+volumes:
+  reservation_data:
