@@ -15,7 +15,9 @@ import (
 type Server struct {
 	db     *store.DB
 	mux    *http.ServeMux
-	limits Limits
+	limits  Limits
+	dataDir string
+	pCfg    map[string]json.RawMessage
 }
 
 func New(db *store.DB, limits Limits, dataDir string) *Server {
