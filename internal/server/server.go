@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/stockyard-dev/stockyard-reservation/internal/store"
 )
@@ -16,8 +18,9 @@ type Server struct {
 	limits Limits
 }
 
-func New(db *store.DB, limits Limits) *Server {
-	s := &Server{db: db, mux: http.NewServeMux(), limits: limits}
+func New(db *store.DB, limits Limits, dataDir string) *Server {
+	s := &Server{db: db, mux: http.NewServeMux(), limits: limits, dataDir: dataDir}
+	s.loadPersonalConfig()
 	s.mux.HandleFunc("GET /api/reservations", s.listReservations)
 	s.mux.HandleFunc("POST /api/reservations", s.createReservations)
 	s.mux.HandleFunc("GET /api/reservations/export.csv", s.exportReservations)
@@ -31,6 +34,7 @@ func New(db *store.DB, limits Limits) *Server {
 	s.mux.HandleFunc("GET /ui/", s.dashboard)
 	s.mux.HandleFunc("GET /", s.root)
 	s.mux.HandleFunc("GET /api/tier", s.tierHandler)
+	s.mux.HandleFunc("GET /api/config", s.configHandler)
 	return s
 }
 
@@ -112,4 +116,29 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	m := map[string]any{"status": "ok", "service": "reservation"}
 	m["reservations"] = s.db.CountReservations()
 	wj(w, 200, m)
+}
+
+// loadPersonalConfig reads config.json from the data directory.
+func (s *Server) loadPersonalConfig() {
+	path := filepath.Join(s.dataDir, "config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var cfg map[string]json.RawMessage
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		log.Printf("warning: could not parse config.json: %v", err)
+		return
+	}
+	s.pCfg = cfg
+	log.Printf("loaded personalization from %s", path)
+}
+
+func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
+	if s.pCfg == nil {
+		wj(w, 200, map[string]any{})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.pCfg)
 }

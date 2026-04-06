@@ -71,7 +71,7 @@ if(q)items=items.filter(function(x){return cfg.f.some(function(f){var v=x[f.n];r
 cfg.f.forEach(function(f){if(f.t==='select'){var sel=document.getElementById('filter-'+r+'-'+f.n);if(sel&&sel.value)items=items.filter(function(x){return x[f.n]===sel.value})}});
 document.getElementById('count-'+r).textContent=items.length+' record'+(items.length!==1?'s':'');
 var tbody=document.getElementById('tbody-'+r);
-if(!items.length){tbody.innerHTML='<tr><td colspan="'+(cfg.f.length+1)+'" class="empty">No records found.</td></tr>';return}
+if(!items.length){var emsg=window._emptyMsg||'No records found.';tbody.innerHTML='<tr><td colspan="'+(cfg.f.length+1)+'" class="empty">'+emsg+'</td></tr>';return}
 var h='';items.forEach(function(item){
 h+='<tr onclick="openEdit(\''+r+'\',\''+item.id+'\')">';
 cfg.f.forEach(function(f){
@@ -109,7 +109,8 @@ if(f.t==='url')inputType='url';
 if(f.t==='phone')inputType='tel';
 if(f.t==='date')inputType='date';
 if(f.t==='datetime')inputType='datetime-local';
-h+='<div class="fr"><label>'+f.l+req+'</label><input type="'+inputType+'" id="f-'+f.n+'" value="'+esc(String(v))+'"></div>';
+var ph=(idx===0&&window._placeholderName&&!v)?' placeholder="'+esc(window._placeholderName)+'"':'';
+h+='<div class="fr"><label>'+f.l+req+'</label><input type="'+inputType+'" id="f-'+f.n+'" value="'+esc(String(v))+'"'+ph+'></div>';
 }
 });
 h+='<div class="acts"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-p" onclick="submit()">'+(isEdit?'Save':'Create')+'</button></div>';
@@ -139,5 +140,23 @@ closeModal();loadAll();
 async function del(r,id){if(!confirm('Delete this record?'))return;await fetch(A+'/'+r+'/'+id,{method:'DELETE'});loadAll()}
 function esc(s){if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal()});
-loadAll();
+// Personalization: fetch config.json overrides from /api/config
+(function(){
+fetch('/api/config').then(function(r){return r.json()}).then(function(cfg){
+if(!cfg||!cfg.dashboard_title)return;
+var h1=document.querySelector('.hdr h1');
+if(h1&&cfg.dashboard_title){h1.innerHTML='<span>&#9670;</span> '+cfg.dashboard_title}
+document.title=cfg.dashboard_title||document.title;
+if(cfg.custom_fields&&cfg.custom_fields.length){
+var firstRes=Object.keys(resCfg)[0];
+if(firstRes){
+var tbl=document.querySelector('#tab-'+firstRes+' .tbl thead tr');
+cfg.custom_fields.forEach(function(f){
+resCfg[firstRes].f.push({n:f.name,l:f.label,t:f.type||'text',r:false,o:f.options||[]});
+if(tbl){var th=document.createElement('th');th.textContent=f.label;tbl.insertBefore(th,tbl.lastElementChild)}
+})}}
+if(cfg.empty_state_message){window._emptyMsg=cfg.empty_state_message}
+if(cfg.placeholder_name){window._placeholderName=cfg.placeholder_name}
+}).catch(function(){}).finally(function(){loadAll()});
+})();
 </script></body></html>`
