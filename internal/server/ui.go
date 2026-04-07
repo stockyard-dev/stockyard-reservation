@@ -47,7 +47,12 @@ const dashHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="v
 async function loadAll(){
 for(var k in resCfg){
 var r=await fetch(A+'/'+k).then(function(x){return x.json()});
-data[k]=r[k]||[];
+var items=r[k]||[];
+try{
+var extras=await fetch(A+'/extras/'+k).then(function(x){return x.json()});
+items.forEach(function(it){if(extras[it.id]){Object.keys(extras[it.id]).forEach(function(key){if(it[key]===undefined)it[key]=extras[it.id][key]})}});
+}catch(e){}
+data[k]=items;
 }
 renderStats();renderRes(activeRes);
 }
@@ -122,18 +127,23 @@ function openEdit(r,id){activeRes=r;var item=null;(data[r]||[]).forEach(function
 function closeModal(){document.getElementById('mbg').classList.remove('open');editId=null}
 
 async function submit(){
-var r=activeRes,cfg=resCfg[r],body={};
+var r=activeRes,cfg=resCfg[r],body={},extras={};
 cfg.f.forEach(function(f){
 var el=document.getElementById('f-'+f.n);if(!el)return;
-if(f.t==='checkbox')body[f.n]=el.checked;
-else if(f.t==='number')body[f.n]=parseFloat(el.value)||0;
-else if(f.t==='integer')body[f.n]=parseInt(el.value)||0;
-else body[f.n]=el.value.trim();
+var val;
+if(f.t==='checkbox')val=el.checked;
+else if(f.t==='number')val=parseFloat(el.value)||0;
+else if(f.t==='integer')val=parseInt(el.value)||0;
+else val=el.value.trim();
+if(f.x)extras[f.n]=val;else body[f.n]=val;
 });
-// Check required
-for(var j=0;j<cfg.f.length;j++){var f=cfg.f[j];if(f.r&&!body[f.n]){alert(f.l+' is required');return}}
+for(var j=0;j<cfg.f.length;j++){var f=cfg.f[j];if(f.r&&!f.x&&!body[f.n]){alert(f.l+' is required');return}}
+var savedId=editId;
 if(editId){await fetch(A+'/'+r+'/'+editId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
-else{var resp=await fetch(A+'/'+r,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!resp.ok){var e=await resp.json();alert(e.error||'Error');return}}
+else{var resp=await fetch(A+'/'+r,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!resp.ok){var e=await resp.json();alert(e.error||'Error');return}var created=await resp.json();savedId=created.id}
+if(Object.keys(extras).length&&savedId){
+await fetch(A+'/extras/'+r+'/'+savedId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(extras)});
+}
 closeModal();loadAll();
 }
 
@@ -152,7 +162,7 @@ var firstRes=Object.keys(resCfg)[0];
 if(firstRes){
 var tbl=document.querySelector('#tab-'+firstRes+' .tbl thead tr');
 cfg.custom_fields.forEach(function(f){
-resCfg[firstRes].f.push({n:f.name,l:f.label,t:f.type||'text',r:false,o:f.options||[]});
+resCfg[firstRes].f.push({n:f.name,l:f.label,t:f.type||'text',r:false,o:f.options||[],x:true});
 if(tbl){var th=document.createElement('th');th.textContent=f.label;tbl.insertBefore(th,tbl.lastElementChild)}
 })}}
 if(cfg.empty_state_message){window._emptyMsg=cfg.empty_state_message}
