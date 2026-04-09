@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -36,8 +37,50 @@ func ExpiredLimits() Limits {
 	return Limits{MaxItems: 0, Tier: "expired", TrialExpired: true}
 }
 
-func DefaultLimits() Limits {
+// licenseFilename is the on-disk fallback location written by
+// PersistLicense and read by DefaultLimits when STOCKYARD_LICENSE_KEY
+// is not set in the environment. Same convention as Option B tools.
+const licenseFilename = "license.txt"
+
+// PersistLicense writes a license key to dataDir/license.txt at 0600.
+// Used by the dashboard activation flow so users don't have to set an
+// env var and restart the server.
+func PersistLicense(dataDir, key string) error {
+	if dataDir == "" {
+		return os.ErrInvalid
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return err
+	}
+	path := filepath.Join(dataDir, licenseFilename)
+	return os.WriteFile(path, []byte(strings.TrimSpace(key)), 0600)
+}
+
+// ValidateLicenseKeyExported is a public wrapper around the private
+// validateLicenseKey check, used by the dashboard activate handler
+// to validate a key without needing access to the internal claims.
+func ValidateLicenseKeyExported(key string) bool {
+	return validateLicenseKey(key, "reservation") != nil
+}
+
+// loadLicenseFromDisk reads the persisted license key from
+// dataDir/license.txt if it exists. Returns "" on any error.
+func loadLicenseFromDisk(dataDir string) string {
+	if dataDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(dataDir, licenseFilename))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func DefaultLimits(dataDir string) Limits {
 	key := os.Getenv("STOCKYARD_LICENSE_KEY")
+	if key == "" {
+		key = loadLicenseFromDisk(dataDir)
+	}
 	if key == "" {
 		log.Printf("[license] No license key. Start a trial at https://stockyard.dev/for/")
 		return NoLicense()
@@ -52,10 +95,13 @@ func DefaultLimits() Limits {
 	if claims.Tier != "individual" && claims.Tier != "*" {
 		found := false
 		for _, t := range claims.Tools {
-			if t == "reservation" || t == "*" { found = true; break }
+			if t == "reservation" || t == "*" {
+				found = true
+				break
+			}
 		}
 		if !found {
-			log.Printf("[license] Tool reservation not in licensed tools")
+			log.Printf("[license] Tool booking not in licensed tools")
 			return NoLicense()
 		}
 	}
@@ -90,21 +136,39 @@ type licenseClaims struct {
 }
 
 func validateLicenseKey(key, product string) *licenseClaims {
-	if !strings.HasPrefix(key, "SY-") { return nil }
+	if !strings.HasPrefix(key, "SY-") {
+		return nil
+	}
 	key = key[3:]
 	parts := strings.SplitN(key, ".", 2)
-	if len(parts) != 2 { return nil }
+	if len(parts) != 2 {
+		return nil
+	}
 	pb, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 	sb, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil || len(sb) != ed25519.SignatureSize { return nil }
+	if err != nil || len(sb) != ed25519.SignatureSize {
+		return nil
+	}
 	pk, _ := hexDec(publicKeyHex)
-	if len(pk) != ed25519.PublicKeySize { return nil }
-	if !ed25519.Verify(ed25519.PublicKey(pk), pb, sb) { return nil }
+	if len(pk) != ed25519.PublicKeySize {
+		return nil
+	}
+	if !ed25519.Verify(ed25519.PublicKey(pk), pb, sb) {
+		return nil
+	}
 	var claims licenseClaims
-	if err := json.Unmarshal(pb, &claims); err != nil { return nil }
-	if claims.Exp > 0 && time.Now().Unix() > claims.Exp { return nil }
-	if claims.P != "" && claims.P != "*" && claims.P != "stockyard" && claims.P != product { return nil }
+	if err := json.Unmarshal(pb, &claims); err != nil {
+		return nil
+	}
+	if claims.Exp > 0 && time.Now().Unix() > claims.Exp {
+		return nil
+	}
+	if claims.P != "" && claims.P != "*" && claims.P != "stockyard" && claims.P != product {
+		return nil
+	}
 	return &claims
 }
 
@@ -122,16 +186,20 @@ func (s *Server) tierHandler(w http.ResponseWriter, r *http.Request) {
 	if s.limits.Tier == "none" {
 		m["message"] = "No license. Start a trial at stockyard.dev"
 	}
-	m["upgrade_url"] = "https://stockyard.dev/reservation/"
+	m["upgrade_url"] = "https://stockyard.dev/booking/"
 	wj(w, 200, m)
 }
 
 func hexDec(s string) ([]byte, error) {
-	if len(s)%2 != 0 { return nil, os.ErrInvalid }
+	if len(s)%2 != 0 {
+		return nil, os.ErrInvalid
+	}
 	b := make([]byte, len(s)/2)
 	for i := 0; i < len(s); i += 2 {
 		h, l := hv(s[i]), hv(s[i+1])
-		if h == 255 || l == 255 { return nil, os.ErrInvalid }
+		if h == 255 || l == 255 {
+			return nil, os.ErrInvalid
+		}
 		b[i/2] = h<<4 | l
 	}
 	return b, nil
@@ -139,9 +207,12 @@ func hexDec(s string) ([]byte, error) {
 
 func hv(c byte) byte {
 	switch {
-	case c >= '0' && c <= '9': return c - '0'
-	case c >= 'a' && c <= 'f': return c - 'a' + 10
-	case c >= 'A' && c <= 'F': return c - 'A' + 10
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10
 	}
 	return 255
 }

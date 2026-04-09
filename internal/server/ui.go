@@ -34,8 +34,38 @@ const dashHTML = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="v
 .acts{display:flex;gap:.4rem;justify-content:flex-end;margin-top:1rem}
 .empty{text-align:center;padding:3rem;color:var(--cm);font-style:italic;font-size:.85rem}
 .count-label{font-family:var(--mono);font-size:.6rem;color:var(--cm);margin-bottom:.5rem}
-@media(max-width:600px){.row2{grid-template-columns:1fr}.toolbar{flex-direction:column}.search{min-width:100%}}
+@media(max-width:600px){.row2{grid-template-columns:1fr}.toolbar{flex-direction:column}.search{min-width:100%}.trial-bar{flex-direction:column;align-items:stretch}.trial-bar input.key-input{width:100%}}
+.trial-bar{display:none;background:linear-gradient(90deg,#3a2419,#2e1c14);border-bottom:2px solid var(--rust);padding:.7rem 1.5rem;font-family:var(--mono);font-size:.68rem;color:var(--cream);align-items:center;gap:1rem;flex-wrap:wrap}
+.trial-bar.show{display:flex}
+.trial-bar-msg{flex:1;min-width:240px;line-height:1.5}
+.trial-bar-msg strong{color:var(--rust);text-transform:uppercase;letter-spacing:1px;font-size:.6rem;display:block;margin-bottom:.15rem}
+.trial-bar-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.trial-bar a.btn-trial{background:var(--rust);color:#fff;padding:.4rem .8rem;text-decoration:none;font-size:.65rem;text-transform:uppercase;letter-spacing:1px;font-weight:700;border:1px solid var(--rust);transition:all .2s}
+.trial-bar a.btn-trial:hover{background:#f08545;border-color:#f08545}
+.trial-bar-divider{color:var(--cm);font-size:.6rem}
+.trial-bar input.key-input{padding:.4rem .5rem;background:var(--bg);border:1px solid var(--bg3);color:var(--cream);font-family:var(--mono);font-size:.6rem;width:200px}
+.trial-bar input.key-input:focus{outline:none;border-color:var(--rust)}
+.trial-bar button.btn-activate{padding:.4rem .7rem;background:var(--bg2);color:var(--cream);border:1px solid var(--leather);font-family:var(--mono);font-size:.6rem;cursor:pointer;text-transform:uppercase;letter-spacing:1px}
+.trial-bar button.btn-activate:hover{background:var(--bg3)}
+.trial-bar button.btn-activate:disabled{opacity:.5;cursor:wait}
+.trial-msg{font-size:.6rem;color:var(--cm);margin-left:.5rem}
+.trial-msg.error{color:#e74c3c}
+.trial-msg.success{color:#4ade80}
+.btn-disabled-trial{opacity:.45;cursor:not-allowed!important}
 </style></head><body>
+<div class="trial-bar" id="trial-bar">
+<div class="trial-bar-msg">
+<strong>License Required</strong>
+<span id="trial-bar-text">You can view your existing data, but writes are locked until you start a 14-day free trial or activate a license key.</span>
+</div>
+<div class="trial-bar-actions">
+<a class="btn-trial" href="https://stockyard.dev/" target="_blank" rel="noopener">Start 14-Day Trial</a>
+<span class="trial-bar-divider">or</span>
+<input type="text" class="key-input" id="trial-key-input" placeholder="SY-..." autocomplete="off" spellcheck="false">
+<button class="btn-activate" id="trial-activate-btn" onclick="activateLicense()">Activate</button>
+<span class="trial-msg" id="trial-msg"></span>
+</div>
+</div>
 <div class="hdr"><h1><span>&#9670;</span> RESERVATION</h1><button class="btn btn-p" id="add-btn">+ Add</button></div>
 <div class="main">
 <div class="stats" id="stats-reservations"></div>
@@ -78,13 +108,18 @@ document.getElementById('count-'+r).textContent=items.length+' record'+(items.le
 var tbody=document.getElementById('tbody-'+r);
 if(!items.length){var emsg=window._emptyMsg||'No records found.';tbody.innerHTML='<tr><td colspan="'+(cfg.f.length+1)+'" class="empty">'+emsg+'</td></tr>';return}
 var h='';items.forEach(function(item){
-h+='<tr onclick="openEdit(\''+r+'\',\''+item.id+'\')">';
+var rowClick=window._trialRequired?'showTrialNudge()':'openEdit(\\''+r+'\\',\\''+item.id+'\\')';
+h+='<tr onclick="'+rowClick+'">';
 cfg.f.forEach(function(f){
 var v=item[f.n];if(v===undefined||v===null)v='';
 if(f.t==='checkbox')v=v?'Yes':'No';
 h+='<td>'+esc(String(v))+'</td>';
 });
+if(window._trialRequired){
+h+='<td></td>';
+}else{
 h+='<td><button class="btn btn-d" onclick="event.stopPropagation();del(\''+r+'\',\''+item.id+'\')">&#10005;</button></td>';
+}
 h+='</tr>';
 });
 tbody.innerHTML=h;
@@ -122,7 +157,7 @@ h+='<div class="acts"><button class="btn" onclick="closeModal()">Cancel</button>
 return h;
 }
 
-document.getElementById('add-btn').onclick=function(){editId=null;document.getElementById('mdl').innerHTML=formHTML(activeRes);document.getElementById('mbg').classList.add('open')};
+document.getElementById('add-btn').onclick=function(){if(window._trialRequired){showTrialNudge();return}editId=null;document.getElementById('mdl').innerHTML=formHTML(activeRes);document.getElementById('mbg').classList.add('open')};
 function openEdit(r,id){activeRes=r;var item=null;(data[r]||[]).forEach(function(x){if(x.id===id)item=x});if(!item)return;editId=id;document.getElementById('mdl').innerHTML=formHTML(r,item);document.getElementById('mbg').classList.add('open')}
 function closeModal(){document.getElementById('mbg').classList.remove('open');editId=null}
 
@@ -167,6 +202,96 @@ if(tbl){var th=document.createElement('th');th.textContent=f.label;tbl.insertBef
 })}}
 if(cfg.empty_state_message){window._emptyMsg=cfg.empty_state_message}
 if(cfg.placeholder_name){window._placeholderName=cfg.placeholder_name}
-}).catch(function(){}).finally(function(){loadAll()});
+}).catch(function(){}).finally(function(){checkTrialState();loadAll()});
 })();
+
+// ─── advanced-tools license gating ───
+window._trialRequired=false;
+
+async function checkTrialState(){
+try{
+var resp=await fetch('/api/tier');
+if(!resp.ok)return;
+var data=await resp.json();
+window._trialRequired=(data.tier==='none'||data.tier==='expired'||data.expired===true);
+var bar=document.getElementById('trial-bar');
+var msgEl=document.getElementById('trial-bar-text');
+if(window._trialRequired){
+bar.classList.add('show');
+if(msgEl&&data.tier==='expired'){
+msgEl.textContent='Your trial or license has expired. Reads work, but writes are locked until you renew.';
+}else if(msgEl){
+msgEl.textContent='You can view your existing data, but writes are locked until you start a 14-day free trial or activate a license key.';
+}
+disableWriteControls();
+if(typeof renderRes==='function'){renderRes('reservations')}
+}else{
+bar.classList.remove('show');
+}
+}catch(e){}
+}
+
+function disableWriteControls(){
+var btn=document.getElementById('add-btn');
+if(btn){
+btn.classList.add('btn-disabled-trial');
+btn.title='Locked: license required';
+}
+}
+
+function showTrialNudge(){
+var input=document.getElementById('trial-key-input');
+if(input){
+input.focus();
+input.style.borderColor='var(--rust)';
+setTimeout(function(){if(input)input.style.borderColor=''},1500);
+}
+}
+
+async function activateLicense(){
+var input=document.getElementById('trial-key-input');
+var btn=document.getElementById('trial-activate-btn');
+var msg=document.getElementById('trial-msg');
+if(!input||!btn||!msg)return;
+var key=(input.value||'').trim();
+if(!key){
+msg.className='trial-msg error';
+msg.textContent='Paste your license key first';
+input.focus();
+return;
+}
+btn.disabled=true;
+msg.className='trial-msg';
+msg.textContent='Activating...';
+try{
+var resp=await fetch('/api/license/activate',{
+method:'POST',
+headers:{'Content-Type':'application/json'},
+body:JSON.stringify({license_key:key})
+});
+var data=await resp.json();
+if(!resp.ok){
+msg.className='trial-msg error';
+msg.textContent=data.error||'Activation failed';
+btn.disabled=false;
+return;
+}
+msg.className='trial-msg success';
+msg.textContent='Activated ('+data.tier+'). Reloading...';
+setTimeout(function(){location.reload()},800);
+}catch(e){
+msg.className='trial-msg error';
+msg.textContent='Network error: '+e.message;
+btn.disabled=false;
+}
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+var input=document.getElementById('trial-key-input');
+if(input){
+input.addEventListener('keydown',function(e){
+if(e.key==='Enter')activateLicense();
+});
+}
+});
 </script></body></html>`
